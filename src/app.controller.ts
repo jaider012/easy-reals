@@ -29,7 +29,7 @@ export class AppController {
 
   @Get('/protected')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('supabase-session')
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Access protected endpoint with Supabase session token',
   })
