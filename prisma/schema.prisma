@@ -1,0 +1,441 @@
+// Faceless Video Platform - Prisma Schema
+// Matches the Supabase database structure
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ================================
+// 1. USERS & AUTHENTICATION
+// ================================
+
+model Profile {
+  id       String  @id @db.Uuid
+  email    String  @unique
+  fullName String? @map("full_name")
+  avatarUrl String? @map("avatar_url")
+  timezone String? @default("UTC")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  
+  // User preferences
+  preferredLanguage String? @default("en") @map("preferred_language")
+  notificationPreferences Json? @default("{\"email\": true, \"push\": true}") @map("notification_preferences")
+  
+  // Business info
+  businessName String? @map("business_name")
+  businessType String? @map("business_type")
+  
+  // Status
+  isActive Boolean @default(true) @map("is_active")
+  lastLoginAt DateTime? @map("last_login_at") @db.Timestamptz
+
+  // Relations
+  userSubscriptions UserSubscription[]
+  userSeries UserSeries[]
+  socialAccounts SocialAccount[]
+  videos Video[]
+  analyticsDaily AnalyticsDaily[]
+  notifications Notification[]
+  jobQueue JobQueue[]
+
+  @@map("profiles")
+}
+
+// ================================
+// 2. SUBSCRIPTIONS & BILLING
+// ================================
+
+model SubscriptionPlan {
+  id          String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String
+  description String?
+  priceMonthly Decimal? @map("price_monthly") @db.Decimal(10, 2)
+  priceYearly  Decimal? @map("price_yearly") @db.Decimal(10, 2)
+  
+  // Limits and features
+  maxVideosPerMonth Int? @map("max_videos_per_month")
+  maxPostsPerWeek   Int? @map("max_posts_per_week")
+  maxSeries         Int? @map("max_series")
+  maxStorageGb      Int? @map("max_storage_gb")
+  
+  // Features
+  features Json @default("{}")
+  
+  // Status
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  userSubscriptions UserSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model UserSubscription {
+  id       String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  planId   String @map("plan_id") @db.Uuid
+  
+  // Stripe integration
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id")
+  stripeCustomerId     String? @map("stripe_customer_id")
+  
+  // Billing
+  status               String    @default("active")
+  currentPeriodStart   DateTime? @map("current_period_start") @db.Timestamptz
+  currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz
+  billingCycle         String    @default("monthly") @map("billing_cycle")
+  
+  // Usage tracking
+  videosUsedThisMonth Int     @default(0) @map("videos_used_this_month")
+  storageUsedGb       Decimal @default(0) @map("storage_used_gb") @db.Decimal(10, 2)
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@map("user_subscriptions")
+}
+
+// ================================
+// 3. CONTENT SERIES & TEMPLATES
+// ================================
+
+model ContentCategory {
+  id          String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String  @unique
+  description String?
+  icon        String?
+  isPopular   Boolean @default(false) @map("is_popular")
+  sortOrder   Int     @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  seriesTemplates SeriesTemplate[]
+
+  @@map("content_categories")
+}
+
+model SeriesTemplate {
+  id           String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  categoryId   String? @map("category_id") @db.Uuid
+  name         String
+  description  String?
+  
+  // Template configuration
+  defaultPrompt        String? @map("default_prompt")
+  defaultStyle         Json?   @default("{}") @map("default_style")
+  defaultVoiceSettings Json?   @default("{}") @map("default_voice_settings")
+  
+  // Content settings
+  estimatedDuration Int?    @map("estimated_duration")
+  contentType       String? @default("story") @map("content_type")
+  
+  // Metadata
+  thumbnailUrl    String? @map("thumbnail_url")
+  isPremium       Boolean @default(false) @map("is_premium")
+  popularityScore Int     @default(0) @map("popularity_score")
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  category    ContentCategory? @relation(fields: [categoryId], references: [id])
+  userSeries  UserSeries[]
+
+  @@map("series_templates")
+}
+
+model UserSeries {
+  id         String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  templateId String? @map("template_id") @db.Uuid
+  
+  // Series configuration
+  name         String
+  description  String?
+  customPrompt String? @map("custom_prompt")
+  
+  // Style settings
+  visualStyle   Json? @default("{}") @map("visual_style")
+  voiceSettings Json? @default("{}") @map("voice_settings")
+  musicSettings Json? @default("{}") @map("music_settings")
+  
+  // Automation settings
+  isActive          Boolean @default(true) @map("is_active")
+  postingFrequency  Int     @default(3) @map("posting_frequency")
+  postingSchedule   Json?   @default("{}") @map("posting_schedule")
+  
+  // Content settings
+  videoDuration      Int     @default(60) @map("video_duration")
+  contentStyle       String? @default("engaging") @map("content_style")
+  useTrendingTopics  Boolean @default(true) @map("use_trending_topics")
+  
+  // Stats
+  totalVideosGenerated Int @default(0) @map("total_videos_generated")
+  totalViews           Int @default(0) @map("total_views")
+  totalLikes           Int @default(0) @map("total_likes")
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user     Profile        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template SeriesTemplate? @relation(fields: [templateId], references: [id])
+  videos   Video[]
+
+  @@map("user_series")
+}
+
+// ================================
+// 4. SOCIAL MEDIA ACCOUNTS
+// ================================
+
+model SocialAccount {
+  id             String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId         String @map("user_id") @db.Uuid
+  
+  // Platform info
+  platform       String
+  platformUserId String @map("platform_user_id")
+  username       String
+  displayName    String? @map("display_name")
+  
+  // OAuth tokens (encrypted)
+  accessToken     String    @map("access_token")
+  refreshToken    String?   @map("refresh_token")
+  tokenExpiresAt  DateTime? @map("token_expires_at") @db.Timestamptz
+  
+  // Account info
+  followerCount    Int     @default(0) @map("follower_count")
+  profileImageUrl  String? @map("profile_image_url")
+  isVerified       Boolean @default(false) @map("is_verified")
+  
+  // Settings
+  isActive Boolean @default(true) @map("is_active")
+  autoPost Boolean @default(true) @map("auto_post")
+  
+  // Metadata
+  connectedAt DateTime  @default(now()) @map("connected_at") @db.Timestamptz
+  lastSyncAt  DateTime? @map("last_sync_at") @db.Timestamptz
+
+  // Relations
+  user        Profile     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  socialPosts SocialPost[]
+
+  @@unique([userId, platform, platformUserId])
+  @@map("social_accounts")
+}
+
+// ================================
+// 5. VIDEO CONTENT MANAGEMENT
+// ================================
+
+model Video {
+  id       String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  seriesId String @map("series_id") @db.Uuid
+  
+  // Content
+  title       String
+  description String?
+  script      String
+  tags        String[]
+  
+  // Generation settings
+  promptUsed         String @map("prompt_used")
+  generationSettings Json?  @default("{}") @map("generation_settings")
+  
+  // File info
+  videoUrl     String? @map("video_url")
+  thumbnailUrl String? @map("thumbnail_url")
+  duration     Int?
+  fileSizeMb   Decimal? @map("file_size_mb") @db.Decimal(8, 2)
+  resolution   String?  @default("1080x1920")
+  
+  // AI generation details
+  aiModelUsed            String? @map("ai_model_used")
+  generationCost         Decimal? @map("generation_cost") @db.Decimal(8, 4)
+  generationTimeSeconds  Int?    @map("generation_time_seconds")
+  
+  // Status
+  status              String @default("generating")
+  generationProgress  Int    @default(0) @map("generation_progress")
+  errorMessage        String? @map("error_message")
+  
+  // Quality metrics
+  qualityScore        Decimal? @map("quality_score") @db.Decimal(3, 2)
+  contentSafetyScore  Decimal? @map("content_safety_score") @db.Decimal(3, 2)
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user        Profile     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  series      UserSeries  @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  socialPosts SocialPost[]
+
+  @@map("videos")
+}
+
+// ================================
+// 6. SOCIAL MEDIA POSTS
+// ================================
+
+model SocialPost {
+  id              String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  videoId         String @map("video_id") @db.Uuid
+  socialAccountId String @map("social_account_id") @db.Uuid
+  
+  // Platform specific
+  platformPostId String? @unique @map("platform_post_id")
+  platform       String
+  
+  // Post content
+  caption  String?
+  hashtags String[]
+  
+  // Scheduling
+  scheduledFor DateTime? @map("scheduled_for") @db.Timestamptz
+  publishedAt  DateTime? @map("published_at") @db.Timestamptz
+  
+  // Status
+  status       String  @default("pending")
+  errorMessage String? @map("error_message")
+  retryCount   Int     @default(0) @map("retry_count")
+  
+  // Analytics (updated periodically)
+  viewsCount     Int     @default(0) @map("views_count")
+  likesCount     Int     @default(0) @map("likes_count")
+  commentsCount  Int     @default(0) @map("comments_count")
+  sharesCount    Int     @default(0) @map("shares_count")
+  engagementRate Decimal @default(0) @map("engagement_rate") @db.Decimal(5, 4)
+  
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  video         Video         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@map("social_posts")
+}
+
+// ================================
+// 7. BACKGROUND JOBS & PROCESSING
+// ================================
+
+model JobQueue {
+  id     String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId String? @map("user_id") @db.Uuid
+  
+  // Job details
+  jobType  String @map("job_type")
+  priority Int    @default(0)
+  payload  Json
+  
+  // Status
+  status       String  @default("pending")
+  progress     Int     @default(0)
+  errorMessage String? @map("error_message")
+  retryCount   Int     @default(0) @map("retry_count")
+  maxRetries   Int     @default(3) @map("max_retries")
+  
+  // Timing
+  scheduledFor DateTime @default(now()) @map("scheduled_for") @db.Timestamptz
+  startedAt    DateTime? @map("started_at") @db.Timestamptz
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user Profile? @relation(fields: [userId], references: [id])
+
+  @@map("job_queue")
+}
+
+// ================================
+// 8. ANALYTICS & TRACKING
+// ================================
+
+model AnalyticsDaily {
+  id     String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  date   DateTime @db.Date
+  
+  // Video metrics
+  videosGenerated     Int @default(0) @map("videos_generated")
+  videosPublished     Int @default(0) @map("videos_published")
+  totalVideoDuration  Int @default(0) @map("total_video_duration")
+  
+  // Social metrics by platform
+  tiktokViews    Int @default(0) @map("tiktok_views")
+  tiktokLikes    Int @default(0) @map("tiktok_likes")
+  youtubeViews   Int @default(0) @map("youtube_views")
+  youtubeLikes   Int @default(0) @map("youtube_likes")
+  instagramViews Int @default(0) @map("instagram_views")
+  instagramLikes Int @default(0) @map("instagram_likes")
+  
+  // Engagement
+  totalViews         Int     @default(0) @map("total_views")
+  totalLikes         Int     @default(0) @map("total_likes")
+  totalComments      Int     @default(0) @map("total_comments")
+  totalShares        Int     @default(0) @map("total_shares")
+  avgEngagementRate  Decimal @default(0) @map("avg_engagement_rate") @db.Decimal(5, 4)
+  
+  // Costs
+  generationCosts Decimal @default(0) @map("generation_costs") @db.Decimal(8, 4)
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("analytics_daily")
+}
+
+// ================================
+// 9. SYSTEM TABLES
+// ================================
+
+model AiServiceCost {
+  id            String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  serviceName   String  @map("service_name")
+  operationType String  @map("operation_type")
+  costPerUnit   Decimal @map("cost_per_unit") @db.Decimal(8, 6)
+  unitType      String  @map("unit_type")
+  effectiveDate DateTime @default(now()) @map("effective_date") @db.Timestamptz
+
+  @@map("ai_service_costs")
+}
+
+model Notification {
+  id        String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId    String  @map("user_id") @db.Uuid
+  
+  // Content
+  type      String
+  title     String
+  message   String
+  actionUrl String? @map("action_url")
+  
+  // Status
+  isRead Boolean @default(false) @map("is_read")
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
